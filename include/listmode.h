@@ -106,7 +106,7 @@ class CoreExport ListModeBase : public ModeHandler
 
 	/** Storage key
 	 */
-	SimpleExtItem<ChanData> extItem;
+	UnserializableSimpleExtItem<ChanData> extItem;
 
  public:
 	/** Constructor.

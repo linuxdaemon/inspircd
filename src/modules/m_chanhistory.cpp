@@ -34,17 +34,91 @@ struct HistoryItem
 		, sourcemask(source->GetFullHost())
 	{
 	}
+
+	HistoryItem(const std::string& Source, const std::string& Text, time_t Time)
+		: ts(Time)
+		, text(Text)
+		, sourcemask(Source)
+	{
+	}
 };
+
+typedef std::deque<HistoryItem> LineList;
 
 struct HistoryList
 {
-	std::deque<HistoryItem> lines;
+	LineList lines;
 	unsigned int maxlen, maxtime;
 	std::string param;
 
 	HistoryList(unsigned int len, unsigned int time, const std::string& oparam)
 		: maxlen(len), maxtime(time), param(oparam) { }
+
+	HistoryList(const LineList& Lines, unsigned int len, unsigned int time, const std::string& oparam)
+		: lines(Lines.begin(), Lines.end())
+		, maxlen(len)
+		, maxtime(time)
+		, param(oparam)
+	{
+	}
 };
+
+namespace Ext
+{
+	template<>
+	struct Serialize<HistoryItem>
+		: SerializeBase<HistoryItem>
+	{
+		typedef std::pair<std::string, std::string> StringPair;
+		typedef std::pair<StringPair, time_t> DataPair;
+
+		Serialize<DataPair> ser;
+
+		void serialize(SerializeFormat format, const value_type& value, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const CXX11_OVERRIDE
+		{
+			return ser.serialize(format, DataPair(StringPair(value.sourcemask, value.text), value.ts), container, extItem, os);
+		}
+
+		value_type* unserialize(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem) const CXX11_OVERRIDE
+		{
+			DataPair* pair = ser.unserialize(format, value, container, extItem);
+			if (!pair)
+				return NULL;
+
+			value_type* vt = new value_type(pair->first.first, pair->first.second, pair->second);
+			delete pair;
+			return vt;
+		}
+	};
+
+	template<>
+	struct Serialize<HistoryList>
+		: SerializeBase<HistoryList>
+	{
+		typedef std::pair<unsigned int, unsigned int> NumPair;
+		typedef std::pair<LineList, std::string> StringPair;
+		typedef std::pair<StringPair, NumPair> DataPair;
+
+		Serialize<DataPair> ser;
+
+		void serialize(SerializeFormat format, const value_type& value, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const CXX11_OVERRIDE
+		{
+			DataPair pair(StringPair(value.lines, value.param), NumPair(value.maxlen, value.maxtime));
+			return ser.serialize(format, pair, container, extItem, os);
+		}
+
+		value_type* unserialize(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem) const CXX11_OVERRIDE
+		{
+			DataPair* pair = ser.unserialize(format, value, container, extItem);
+			if (!pair)
+				return NULL;
+
+			value_type* vt = new value_type(pair->first.first, pair->second.first, pair->second.second, pair->first.second);
+			delete pair;
+			return vt;
+		}
+	};
+}
 
 class HistoryMode : public ParamMode<HistoryMode, SimpleExtItem<HistoryList> >
 {

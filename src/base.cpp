@@ -246,19 +246,6 @@ LocalStringExt::~LocalStringExt()
 {
 }
 
-std::string LocalStringExt::serialize(SerializeFormat format, const Extensible* container, void* item) const
-{
-	if ((item) && (format != FORMAT_NETWORK))
-		return *static_cast<std::string*>(item);
-	return "";
-}
-
-void LocalStringExt::unserialize(SerializeFormat format, Extensible* container, const std::string& value)
-{
-	if (format != FORMAT_NETWORK)
-		set(container, value);
-}
-
 LocalIntExt::LocalIntExt(const std::string& Key, ExtensibleType exttype, Module* mod)
 	: LocalExtItem(Key, exttype, mod)
 {
@@ -345,4 +332,65 @@ void StringExtItem::free(Extensible* container, void* item)
 ModuleException::ModuleException(const std::string &message, Module* who)
 	: CoreException(message, who ? who->ModuleSourceFile : "A Module")
 {
+}
+
+std::ostream& Ext::EscapeNulls(const std::string& s, std::ostream& os)
+{
+	for (std::string::const_iterator it = s.begin(), it_end = s.end(); it != it_end; ++it)
+	{
+		switch (*it)
+		{
+			case '\0':
+				os << "\\0";
+				break;
+			case '\\':
+				os << "\\";
+			default:
+				os << *it;
+				break;
+		}
+	}
+	return os;
+}
+
+Ext::StringList Ext::SplitUnescapeNulls(const std::string& str)
+{
+	StringList items;
+
+	std::string tmp;
+	bool escaped = false;
+
+	for (std::string::const_iterator it = str.begin(), it_end = str.end(); it != it_end; ++it)
+	{
+		char c = *it;
+		if (c == '\0')
+		{
+			items.push_back(tmp);
+			tmp.clear();
+			continue;
+		}
+
+		if (escaped)
+		{
+			switch (c)
+			{
+				case '0':
+					c = '\0';
+					break;
+				case '\\':
+				default:
+					break;
+			}
+			escaped = false;
+		}
+		else if (c == '\\')
+		{
+			escaped = true;
+			continue;
+		}
+
+		tmp.push_back(c);
+	}
+
+	return items;
 }

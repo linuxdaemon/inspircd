@@ -89,6 +89,15 @@ class joinfloodsettings
 	}
 };
 
+namespace Ext
+{
+	template<>
+	struct Serialize<joinfloodsettings>
+		: SerializePrimitive<joinfloodsettings>
+	{
+	};
+}
+
 /** Handles channel mode +j
  */
 class JoinFlood : public ParamMode<JoinFlood, SimpleExtItem<joinfloodsettings> >

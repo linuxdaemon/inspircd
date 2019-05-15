@@ -42,6 +42,33 @@ class BanRedirectEntry
 
 typedef std::vector<BanRedirectEntry> BanRedirectList;
 
+namespace Ext
+{
+	template<>
+	struct Serialize<BanRedirectEntry>
+		: SerializeBase<BanRedirectEntry>
+	{
+		typedef std::pair<std::string, std::string> DataPair;
+		Serialize<DataPair> ser;
+
+		void serialize(SerializeFormat format, const value_type& value, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const CXX11_OVERRIDE
+		{
+			return ser.serialize(format, DataPair(value.targetchan, value.banmask), container, extItem, os);
+		}
+
+		value_type* unserialize(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem) const CXX11_OVERRIDE
+		{
+			DataPair* data = ser.unserialize(format, value, container, extItem);
+			if (!data)
+				return NULL;
+
+			value_type* vt = new value_type(data->first, data->second);
+			delete data;
+			return vt;
+		}
+	};
+}
+
 class BanRedirect : public ModeWatcher
 {
 	ChanModeReference ban;

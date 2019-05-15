@@ -40,10 +40,35 @@ class KickRejoinData
 		std::string uuid;
 		time_t expire;
 
+		typedef std::pair<std::string, time_t> DataPair;
+		static const Ext::Serialize<DataPair> ser;
+
 		KickedUser(User* user, unsigned int Delay)
 			: uuid(user->uuid)
 			, expire(ServerInstance->Time() + Delay)
 		{
+		}
+
+		KickedUser(const std::string& s, time_t e)
+			: uuid(s)
+			, expire(e)
+		{
+		}
+
+		void Serialize(SerializeFormat format, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const
+		{
+			return ser.serialize(format, DataPair(uuid, expire), container, extItem, os);
+		}
+
+		static KickedUser* FromString(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem)
+		{
+			DataPair* pair = ser.unserialize(format, value, container, extItem);
+			if (!pair)
+				return NULL;
+
+			KickedUser* ku = new KickedUser(pair->first, pair->second);
+			delete pair;
+			return ku;
 		}
 	};
 
@@ -51,10 +76,31 @@ class KickRejoinData
 
 	mutable KickedList kicked;
 
+	typedef std::pair<unsigned int, KickedList> SerPair;
+
+	static const Ext::Serialize<SerPair> dataSer;
+
  public:
 	const unsigned int delay;
 
 	KickRejoinData(unsigned int Delay) : delay(Delay) { }
+
+	void Serialize(SerializeFormat format, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const
+	{
+		return dataSer.serialize(format, SerPair(delay, kicked), container, extItem, os);
+	}
+
+	static KickRejoinData* FromString(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem)
+	{
+		SerPair* pair = dataSer.unserialize(format, value, container, extItem);
+		if (!pair)
+			return NULL;
+
+		KickRejoinData* krd = new KickRejoinData(pair->first);
+		krd->kicked.assign(pair->second.begin(), pair->second.end());
+		delete pair;
+		return krd;
+	}
 
 	bool canjoin(LocalUser* user) const
 	{

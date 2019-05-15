@@ -80,6 +80,15 @@ class nickfloodsettings
 	}
 };
 
+namespace Ext
+{
+	template<>
+	struct Serialize<nickfloodsettings>
+		: SerializePrimitive<nickfloodsettings>
+	{
+	};
+}
+
 /** Handles channel mode +F
  */
 class NickFlood : public ParamMode<NickFlood, SimpleExtItem<nickfloodsettings> >

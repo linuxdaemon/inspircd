@@ -298,6 +298,24 @@ class SaslAuthenticator
 	}
 };
 
+namespace Ext
+{
+	template<>
+	struct Serialize<SaslAuthenticator>
+		: SerializeBase<SaslAuthenticator>
+	{
+		// TODO implement
+		void serialize(SerializeFormat format, const value_type& value, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const CXX11_OVERRIDE
+		{
+		}
+
+		value_type* unserialize(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem) const CXX11_OVERRIDE
+		{
+			return NULL;
+		}
+	};
+}
+
 class CommandAuthenticate : public SplitCommand
 {
  private:

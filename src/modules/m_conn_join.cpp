@@ -34,18 +34,63 @@ static void JoinChannels(LocalUser* u, const std::string& chanlist)
 	}
 }
 
+class JoinTimer;
+
+typedef SimpleExtItem<JoinTimer> JTExt;
+
+struct TimerSettings
+{
+	unsigned int interval;
+	time_t trigger;
+
+	TimerSettings(unsigned int Interval, time_t Trigger)
+		: interval(Interval)
+		, trigger(Trigger)
+	{
+	}
+
+	TimerSettings(const Timer* timer)
+		: interval(timer->GetInterval())
+		, trigger(timer->GetTrigger())
+	{
+	}
+
+	void set(Timer* timer) const
+	{
+		timer->SetTrigger(trigger);
+		timer->SetInterval(interval);
+	}
+};
+
+namespace Ext
+{
+	template<>
+	struct Serialize<TimerSettings>
+		: SerializePrimitive<TimerSettings>
+	{
+	};
+}
+
 class JoinTimer : public Timer
 {
  private:
 	LocalUser* const user;
 	const std::string channels;
-	SimpleExtItem<JoinTimer>& ext;
+	JTExt& ext;
+
+	typedef std::pair<TimerSettings, std::string> DataPair;
+	static const Ext::Serialize<DataPair> dataSer;
 
  public:
-	JoinTimer(LocalUser* u, SimpleExtItem<JoinTimer>& ex, const std::string& chans, unsigned int delay)
+	JoinTimer(LocalUser* u, JTExt& ex, const std::string& chans, unsigned int delay, time_t Trigger = 0)
 		: Timer(delay, false)
-		, user(u), channels(chans), ext(ex)
+		, user(u)
+		, channels(chans)
+		, ext(ex)
 	{
+		if (Trigger)
+			SetTrigger(Trigger);
+
 		ServerInstance->Timers.AddTimer(this);
 	}
 
@@ -57,11 +102,43 @@ class JoinTimer : public Timer
 		ext.unset(user);
 		return false;
 	}
+
+	void Serialize(SerializeFormat format, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const
+	{
+		return dataSer.serialize(format, DataPair(TimerSettings(this), channels), container, extItem, os);
+	}
+
+	static JoinTimer* FromString(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem)
+	{
+		if (!container)
+			throw ModuleException("Unable to find user while unserializing JoinTimer object");
+
+		User* user = const_cast<User*>(static_cast<const User*>(container));
+
+		LocalUser* lu = IS_LOCAL(user);
+		if (!lu)
+			throw ModuleException("Attempt to unserialize JoinTimer for remote user");
+
+		if (!extItem)
+			throw ModuleException("Unable to find join_timer ext while unserializing JoinTimer object");
+
+		JTExt* jtext = const_cast<JTExt*>(static_cast<const JTExt*>(extItem));
+
+		DataPair* pair = dataSer.unserialize(format, value, container, extItem);
+		if (!pair)
+			return NULL;
+
+		JoinTimer* jt = new JoinTimer(lu, *jtext, pair->second, pair->first.interval, pair->first.trigger);
+
+		delete pair;
+
+		return jt;
+	}
 };
 
 class ModuleConnJoin : public Module
 {
-	SimpleExtItem<JoinTimer> ext;
+	JTExt ext;
 	std::string defchans;
 	unsigned int defdelay;
 

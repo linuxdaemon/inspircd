@@ -178,6 +178,35 @@ class SilenceEntry
 	}
 };
 
+namespace Ext
+{
+	template<>
+	struct Serialize<SilenceEntry>
+		: SerializeBase<SilenceEntry>
+	{
+		typedef std::pair<uint32_t, std::string> DataPair;
+		Serialize<DataPair> ser;
+
+		void serialize(SerializeFormat format, const value_type& value, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const CXX11_OVERRIDE
+		{
+			return ser.serialize(format, DataPair(value.flags, value.mask), container, extItem, os);
+		}
+
+		value_type* unserialize(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem) const CXX11_OVERRIDE
+		{
+			DataPair* pair = ser.unserialize(format, value, container, extItem);
+
+			if (!pair)
+				return NULL;
+
+			value_type* vt = new value_type(pair->first, pair->second);
+			delete pair;
+
+			return vt;
+		}
+	};
+}
+
 typedef insp::flat_set<SilenceEntry> SilenceList;
 
 class SilenceMessage : public ClientProtocol::Message

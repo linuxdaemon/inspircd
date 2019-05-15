@@ -44,6 +44,15 @@ class AntiCapsSettings
 	}
 };
 
+namespace Ext
+{
+	template<>
+	struct Serialize<AntiCapsSettings>
+		: SerializePrimitive<AntiCapsSettings>
+	{
+	};
+}
+
 class AntiCapsMode : public ParamMode<AntiCapsMode, SimpleExtItem<AntiCapsSettings> >
 {
  private:

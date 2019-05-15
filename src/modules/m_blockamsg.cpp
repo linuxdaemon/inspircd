@@ -46,6 +46,35 @@ class BlockedMessage
 	}
 };
 
+namespace Ext
+{
+	template<>
+	struct Serialize<BlockedMessage>
+		: SerializeBase<BlockedMessage>
+	{
+		typedef std::pair<std::string, std::string> StringPair;
+		typedef std::pair<StringPair, time_t> DataPair;
+
+		Serialize<DataPair> ser;
+
+		void serialize(SerializeFormat format, const value_type& value, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const CXX11_OVERRIDE
+		{
+			return ser.serialize(format, DataPair(StringPair(value.message, value.target), value.sent), container, extItem, os);
+		}
+
+		value_type* unserialize(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem) const CXX11_OVERRIDE
+		{
+			DataPair* pair = ser.unserialize(format, value, container, extItem);
+			if (!pair)
+				return NULL;
+
+			value_type* vt = new value_type(pair->first.first, pair->first.second, pair->second);
+			delete pair;
+			return vt;
+		}
+	};
+}
+
 class ModuleBlockAmsg : public Module
 {
 	unsigned int ForgetDelay;

@@ -92,6 +92,28 @@ class DCCAllow
 	}
 };
 
+namespace Ext
+{
+	template<>
+	struct Serialize<DCCAllow>
+		: SerializeBase<DCCAllow>
+	{
+		typedef std::pair<std::string, std::string> StringPair;
+		typedef std::pair<time_t, unsigned long> NumPair;
+		typedef std::pair<StringPair, NumPair> DataPair;
+
+		Serialize<DataPair> ser;
+
+		void serialize(SerializeFormat format, const DCCAllow& value, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const CXX11_OVERRIDE
+		{
+			DataPair pair(StringPair(value.nickname, value.hostmask), NumPair(value.set_on, value.length));
+			return ser.serialize(format, pair, container, extItem, os);
+		}
+
+		value_type* unserialize(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem) const CXX11_OVERRIDE;
+	};
+}
+
 typedef std::vector<User *> userlist;
 userlist ul;
 typedef std::vector<DCCAllow> dccallowlist;
@@ -99,6 +121,17 @@ dccallowlist* dl;
 typedef std::vector<BannedFileList> bannedfilelist;
 bannedfilelist bfl;
 typedef SimpleExtItem<dccallowlist> DCCAllowExt;
+
+DCCAllow* Ext::Serialize<DCCAllow>::unserialize(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem) const
+{
+	DataPair* pair = ser.unserialize(format, value, container, extItem);
+	if (!pair)
+		return NULL;
+
+	ul.push_back(const_cast<User*>(static_cast<const User*>(container)));
+
+	return new DCCAllow(pair->first.first, pair->first.second, pair->second.first, pair->second.second);
+}
 
 class CommandDccallow : public Command
 {

@@ -56,27 +56,141 @@ class ChannelSettings
 			}
 		}
 	}
+
+	bool ParseSettings(const std::string& parameter)
+	{
+		irc::sepstream stream(parameter, ':');
+		std::string item;
+		if (!stream.GetToken(item))
+			// Required parameter missing
+			return false;
+
+		if ((item[0] == '*') || (item[0] == '~'))
+		{
+			Action = ((item[0] == '*') ? ChannelSettings::ACT_BAN : ChannelSettings::ACT_BLOCK);
+			item.erase(item.begin());
+		}
+		else
+			Action = ChannelSettings::ACT_KICK;
+
+		if ((Lines = ConvToNum<unsigned int>(item)) == 0)
+			return false;
+
+		if (!InspIRCd::Duration(item, Seconds))
+			return false;
+
+		if ((!stream.GetToken(item)) || (Seconds == 0))
+			// Required parameter missing
+			return false;
+
+		// The diff and backlog parameters are optional
+		Diff = Backlog = 0;
+		if (stream.GetToken(item))
+		{
+			// There is a diff parameter, see if it's valid (> 0)
+			if ((Diff = ConvToNum<unsigned int>(item)) == 0)
+				return false;
+
+			if (stream.GetToken(item))
+			{
+				// There is a backlog parameter, see if it's valid
+				if ((Backlog = ConvToNum<unsigned int>(item)) == 0)
+					return false;
+
+				// If there are still tokens, then it's invalid because we allow only 4
+				if (stream.GetToken(item))
+					return false;
+			}
+		}
+
+		return true;
+	}
 };
+
+struct RepeatItem
+{
+	time_t ts;
+	std::string line;
+	RepeatItem(time_t TS, const std::string& Line)
+		: ts(TS)
+		, line(Line) { }
+};
+
+typedef std::deque<RepeatItem> RepeatItemList;
+
+struct MemberInfo
+{
+	RepeatItemList ItemList;
+	unsigned int Counter;
+	MemberInfo()
+		: Counter(0) { }
+};
+
+namespace Ext
+{
+	template<>
+	struct Serialize<ChannelSettings>
+		: SerializePrimitive<ChannelSettings>
+	{
+	};
+
+	template<>
+	struct Serialize<RepeatItem>
+		: SerializeBase<RepeatItem>
+	{
+		typedef std::pair<time_t, std::string> DataPair;
+
+		Serialize<DataPair> ser;
+
+		void serialize(SerializeFormat format, const value_type& value, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const CXX11_OVERRIDE
+		{
+			return ser.serialize(format, std::make_pair(value.ts, value.line), container, extItem, os);
+		}
+
+		value_type* unserialize(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem) const CXX11_OVERRIDE
+		{
+			DataPair* p = ser.unserialize(format, value, container, extItem);
+
+			if (!p)
+				return NULL;
+
+			value_type* vt = new value_type(p->first, p->second);
+			delete p;
+			return vt;
+		}
+	};
+
+	template<>
+	struct Serialize<MemberInfo>
+		: SerializeBase<MemberInfo>
+	{
+		typedef std::pair<RepeatItemList, unsigned int> DataPair;
+
+		Serialize<DataPair> ser;
+
+		void serialize(SerializeFormat format, const value_type& value, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const CXX11_OVERRIDE
+		{
+			return ser.serialize(format, std::make_pair(value.ItemList, value.Counter), container, extItem, os);
+		}
+
+		value_type* unserialize(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem) const CXX11_OVERRIDE
+		{
+			DataPair* p = ser.unserialize(format, value, container, extItem);
+
+			if (!p)
+				return NULL;
+
+			value_type* vt = new value_type;
+			vt->Counter = p->second;
+			vt->ItemList = p->first;
+			delete p;
+			return vt;
+		}
+	};
+}
 
 class RepeatMode : public ParamMode<RepeatMode, SimpleExtItem<ChannelSettings> >
 {
- private:
-	struct RepeatItem
-	{
-		time_t ts;
-		std::string line;
-		RepeatItem(time_t TS, const std::string& Line) : ts(TS), line(Line) { }
-	};
-
-	typedef std::deque<RepeatItem> RepeatItemList;
-
-	struct MemberInfo
-	{
-		RepeatItemList ItemList;
-		unsigned int Counter;
-		MemberInfo() : Counter(0) {}
-	};
-
 	struct ModuleSettings
 	{
 		unsigned int MaxLines;
@@ -138,7 +252,7 @@ class RepeatMode : public ParamMode<RepeatMode, SimpleExtItem<ChannelSettings> >
 	ModeAction OnSet(User* source, Channel* channel, std::string& parameter) CXX11_OVERRIDE
 	{
 		ChannelSettings settings;
-		if (!ParseSettings(source, parameter, settings))
+		if (!settings.ParseSettings(parameter))
 		{
 			source->WriteNumeric(Numerics::InvalidModeParameter(channel, this, parameter,
 				"Invalid repeat syntax. Syntax is: [~|*]<lines>:<sec>[:<difference>][:<backlog>]"));
@@ -258,55 +372,6 @@ class RepeatMode : public ParamMode<RepeatMode, SimpleExtItem<ChannelSettings> >
 	}
 
  private:
-	bool ParseSettings(User* source, std::string& parameter, ChannelSettings& settings)
-	{
-		irc::sepstream stream(parameter, ':');
-		std::string	item;
-		if (!stream.GetToken(item))
-			// Required parameter missing
-			return false;
-
-		if ((item[0] == '*') || (item[0] == '~'))
-		{
-			settings.Action = ((item[0] == '*') ? ChannelSettings::ACT_BAN : ChannelSettings::ACT_BLOCK);
-			item.erase(item.begin());
-		}
-		else
-			settings.Action = ChannelSettings::ACT_KICK;
-
-		if ((settings.Lines = ConvToNum<unsigned int>(item)) == 0)
-			return false;
-
-		if (!InspIRCd::Duration(item, settings.Seconds))
-			return false;
-
-		if ((!stream.GetToken(item)) || (settings.Seconds == 0))
-			// Required parameter missing
-			return false;
-
-		// The diff and backlog parameters are optional
-		settings.Diff = settings.Backlog = 0;
-		if (stream.GetToken(item))
-		{
-			// There is a diff parameter, see if it's valid (> 0)
-			if ((settings.Diff = ConvToNum<unsigned int>(item)) == 0)
-				return false;
-
-			if (stream.GetToken(item))
-			{
-				// There is a backlog parameter, see if it's valid
-				if ((settings.Backlog = ConvToNum<unsigned int>(item)) == 0)
-					return false;
-
-				// If there are still tokens, then it's invalid because we allow only 4
-				if (stream.GetToken(item))
-					return false;
-			}
-		}
-
-		return true;
-	}
-
 	bool ValidateSettings(LocalUser* source, Channel* channel, const std::string& parameter, const ChannelSettings& settings)
 	{
 		if (ms.MaxLines && settings.Lines > ms.MaxLines)

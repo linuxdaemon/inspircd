@@ -31,8 +31,12 @@
 #include "modules/geolocation.h"
 #include <maxminddb.h>
 
+typedef std::pair<std::string, std::string> LocPair;
+
 class GeolocationExtItem : public LocalExtItem
 {
+	const Ext::Serialize<LocPair> ser;
+
  public:
 	GeolocationExtItem(Module* parent)
 		: LocalExtItem("geolocation", ExtensionItem::EXT_USER, parent)
@@ -60,6 +64,33 @@ class GeolocationExtItem : public LocalExtItem
 	void unset(Extensible* container)
 	{
 		free(container, unset_raw(container));
+	}
+
+	std::string serialize(SerializeFormat format, const Extensible* container, void* item) const CXX11_OVERRIDE
+	{
+		std::string out;
+		if (format == FORMAT_NETWORK)
+			return "";
+
+		Geolocation::Location* loc = static_cast<Geolocation::Location*>(item);
+		if (!loc)
+			return "";
+
+		return ser.serialize(format, LocPair(loc->GetCode(), loc->GetName()), container, this);
+	}
+
+	void unserialize(SerializeFormat format, Extensible* container, const std::string& value) override
+	{
+		if (format == FORMAT_NETWORK || value.empty())
+			return;
+
+		LocPair* loc = ser.unserialize(format, value, container, this);
+		if (loc)
+		{
+			Geolocation::Location* location = new Geolocation::Location(loc->first, loc->second);
+			delete loc;
+			set(container, location);
+		}
 	}
 };
 

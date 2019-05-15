@@ -150,16 +150,362 @@ class CoreExport LocalExtItem : public ExtensionItem
 	void free(Extensible* container, void* item) CXX11_OVERRIDE = 0;
 };
 
+namespace Ext
+{
+	template<typename T>
+	struct BaseInserter
+	{
+		typedef T ContainerType;
+		typedef typename ContainerType::value_type value_type;
+
+		virtual void insert(ContainerType& container, const value_type& value) const = 0;
+	};
+
+	template<typename T>
+	struct Inserter
+		: BaseInserter<T>
+	{
+		void insert(T& container, const typename T::value_type& value) const CXX11_OVERRIDE
+		{
+			container.push_back(value);
+		}
+	};
+
+	template<typename T, typename U, typename C, typename E>
+	struct Inserter<insp::flat_map<T, U, C, E> >
+		: BaseInserter<insp::flat_map<T, U, C, E> >
+	{
+		typedef typename BaseInserter<insp::flat_map<T, U, C, E> >::ContainerType ContainerType;
+		typedef typename ContainerType::value_type value_type;
+
+		void insert(ContainerType& container, const value_type& value) const CXX11_OVERRIDE
+		{
+			container.insert(value);
+		}
+	};
+
+	template<typename T, typename C, typename E>
+	struct Inserter<insp::flat_set<T, C, E> >
+		: BaseInserter<insp::flat_set<T, C, E> >
+	{
+		typedef typename BaseInserter<insp::flat_set<T, C, E> >::ContainerType ContainerType;
+		typedef typename ContainerType::value_type value_type;
+
+		void insert(ContainerType& container, const value_type& value) const CXX11_OVERRIDE
+		{
+			container.insert(value);
+		}
+	};
+
+	std::ostream& EscapeNulls(const std::string& s, std::ostream& os);
+
+	typedef std::vector<std::string> StringList;
+
+	StringList SplitUnescapeNulls(const std::string& str);
+
+	template<typename T>
+	struct SerializeBase
+	{
+		typedef T value_type;
+
+		virtual void serialize(SerializeFormat format, const T& value, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const = 0;
+
+		std::string serializeStr(SerializeFormat format, const T& value, const Extensible* container, const ExtensionItem* extItem) const
+		{
+			std::ostringstream sstr;
+			this->serialize(format, value, container, extItem, sstr);
+			return sstr.str();
+		}
+
+		virtual T* unserialize(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem) const = 0;
+	};
+
+	template<typename T>
+	struct Serialize
+		: SerializeBase<T>
+	{
+		void serialize(SerializeFormat format, const T& value, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const CXX11_OVERRIDE
+		{
+			value.Serialize(format, container, extItem, os);
+		}
+
+		T* unserialize(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem) const CXX11_OVERRIDE
+		{
+			return T::FromString(format, value, container, extItem);
+		}
+	};
+
+	template<>
+	struct Serialize<std::string>
+		: SerializeBase<std::string>
+	{
+		void serialize(SerializeFormat format, const value_type& value, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const CXX11_OVERRIDE
+		{
+			os << value;
+		}
+
+		value_type* unserialize(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem) const CXX11_OVERRIDE
+		{
+			return new value_type(value);
+		}
+	};
+
+	template<>
+	struct Serialize<User*>
+		: SerializeBase<User*>
+	{
+		// TODO implement
+		void serialize(SerializeFormat format, const value_type& value, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const CXX11_OVERRIDE
+		{
+		}
+
+		value_type* unserialize(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem) const CXX11_OVERRIDE
+		{
+			return NULL;
+		}
+	};
+
+	template<>
+	struct Serialize<LocalUser*>
+		: SerializeBase<LocalUser*>
+	{
+		// TODO implement
+		void serialize(SerializeFormat format, const value_type& value, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const CXX11_OVERRIDE
+		{
+		}
+
+		value_type* unserialize(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem) const CXX11_OVERRIDE
+		{
+			return NULL;
+		}
+	};
+
+	template<typename T>
+	struct SerializeContainer
+		: SerializeBase<T>
+	{
+		typedef typename T::const_iterator iter;
+		typedef typename iter::value_type value_type;
+
+		const Serialize<value_type> ser;
+		const Inserter<T> inserter;
+
+		void serialize(SerializeFormat format, const T& value, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const CXX11_OVERRIDE
+		{
+			for (iter it = value.begin(); it != value.end(); ++it)
+				EscapeNulls(ser.serializeStr(format, *it, container, extItem), os) << '\0';
+		}
+
+		T* unserialize(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem) const CXX11_OVERRIDE
+		{
+			StringList values = SplitUnescapeNulls(value);
+			T* cont = new T;
+
+			for (StringList::const_iterator it = values.begin(), it_end = values.end(); it != it_end; ++it)
+			{
+				value_type* o = ser.unserialize(format, *it, container, extItem);
+				if (o)
+					inserter.insert(*cont, *o);
+
+				delete o;
+			}
+
+			return cont;
+		}
+	};
+
+	template<typename T, typename A>
+	struct Serialize<std::vector<T, A> >
+		: SerializeContainer<std::vector<T, A> >
+	{
+	};
+
+	template<typename T, typename A>
+	struct Serialize<std::deque<T, A> >
+		: SerializeContainer<std::deque<T, A> >
+	{
+	};
+
+	template<typename T, typename Comp, typename ElementComp>
+	struct Serialize<insp::flat_set<T, Comp, ElementComp> >
+		: SerializeContainer<insp::flat_set<T, Comp, ElementComp> >
+	{
+	};
+
+	template<typename T, typename Comp, typename ElementComp>
+	struct Serialize<insp::flat_multiset<T, Comp, ElementComp> >
+		: SerializeContainer<insp::flat_multiset<T, Comp, ElementComp> >
+	{
+	};
+
+	template<typename T, typename V, typename Comp, typename ElementComp>
+	struct Serialize<insp::flat_map<T, V, Comp, ElementComp> >
+		: SerializeContainer<insp::flat_map<T, V, Comp, ElementComp> >
+	{
+	};
+
+	template<typename T, typename V, typename Comp, typename ElementComp>
+	struct Serialize<insp::flat_multimap<T, V, Comp, ElementComp> >
+		: SerializeContainer<insp::flat_multimap<T, V, Comp, ElementComp> >
+	{
+	};
+
+	template<typename T1, typename T2>
+	struct Serialize<std::pair<T1, T2> >
+		: SerializeBase<std::pair<T1, T2> >
+	{
+		Serialize<T1> ser1;
+		Serialize<T2> ser2;
+
+		typedef typename SerializeBase<std::pair<T1, T2> >::value_type value_type;
+
+		void serialize(SerializeFormat format, const value_type& value, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const CXX11_OVERRIDE
+		{
+			EscapeNulls(ser1.serializeStr(format, value.first, container, extItem), os) << '\0';
+
+			EscapeNulls(ser2.serializeStr(format, value.second, container, extItem), os) << '\0';
+		}
+
+		value_type* unserialize(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem) const CXX11_OVERRIDE
+		{
+			if (value.empty())
+				return NULL;
+
+			StringList values = SplitUnescapeNulls(value);
+
+			T1* v1 = ser1.unserialize(format, values.at(0), container, extItem);
+			T2* v2 = ser2.unserialize(format, values.at(1), container, extItem);
+
+			if (!v1 || !v2)
+				return NULL;
+
+			value_type* vt = new value_type(*v1, *v2);
+
+			delete v1;
+			delete v2;
+
+			return vt;
+		}
+	};
+
+	/**
+	 * Allows for basic serialization of simple structs that contain only primitive types
+	 * Example:
+	 * 		struct Data
+	 * 		{
+	 * 			int a;
+	 *			unsigned int b;
+	 *		};
+	 */
+	template<typename T>
+	struct SerializePrimitive
+		: SerializeBase<T>
+	{
+		void serialize(SerializeFormat format, const T& value, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const CXX11_OVERRIDE
+		{
+			os.write((const char*)&value, sizeof(T));
+		}
+
+		T* unserialize(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem) const CXX11_OVERRIDE
+		{
+			return new T(*(const T*)value.c_str());
+		}
+	};
+
+	template<typename T>
+	struct SerializeNumeric
+		: SerializePrimitive<T>
+	{
+		void serialize(SerializeFormat format, const T& value, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const CXX11_OVERRIDE
+		{
+			if (format == FORMAT_USER)
+				os << ConvNumeric(value);
+			else
+				SerializePrimitive<T>::serialize(format, value, container, extItem, os);
+		}
+
+		T* unserialize(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem) const CXX11_OVERRIDE
+		{
+			if (format == FORMAT_USER)
+				return new T(ConvToNum<T>(value));
+
+			return SerializePrimitive<T>::unserialize(format, value, container, extItem);
+		}
+	};
+
+	template<>
+	struct Serialize<int8_t>
+		: SerializeNumeric<int8_t>
+	{
+	};
+
+	template<>
+	struct Serialize<int16_t>
+		: SerializeNumeric<int16_t>
+	{
+	};
+
+	template<>
+	struct Serialize<int32_t>
+		: SerializeNumeric<int32_t>
+	{
+	};
+
+	template<>
+	struct Serialize<int64_t>
+		: SerializeNumeric<int64_t>
+	{
+	};
+
+	template<>
+	struct Serialize<uint8_t>
+		: SerializeNumeric<uint8_t>
+	{
+	};
+
+	template<>
+	struct Serialize<uint16_t>
+		: SerializeNumeric<uint16_t>
+	{
+	};
+
+	template<>
+	struct Serialize<uint32_t>
+		: SerializeNumeric<uint32_t>
+	{
+	};
+
+	template<>
+	struct Serialize<uint64_t>
+		: SerializeNumeric<uint64_t>
+	{
+	};
+
+	template<>
+	struct Serialize<bool>
+		: SerializeNumeric<bool>
+	{
+		void serialize(SerializeFormat format, const bool& value, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const CXX11_OVERRIDE
+		{
+			if (format == FORMAT_USER)
+				os << (value ? "true" : "false");
+			else
+				SerializeNumeric<bool>::serialize(format, value, container, extItem, os);
+		}
+	};
+}
+
 template <typename T, typename Del = stdalgo::defaultdeleter<T> >
-class SimpleExtItem : public LocalExtItem
+class UnserializableSimpleExtItem
+	: public LocalExtItem
 {
  public:
-	SimpleExtItem(const std::string& Key, ExtensibleType exttype, Module* parent)
+	UnserializableSimpleExtItem(const std::string& Key, ExtensibleType exttype, Module* parent)
 		: LocalExtItem(Key, exttype, parent)
 	{
 	}
 
-	virtual ~SimpleExtItem()
+	virtual ~UnserializableSimpleExtItem()
 	{
 	}
 
@@ -197,13 +543,41 @@ class SimpleExtItem : public LocalExtItem
 	}
 };
 
+template<typename T, typename Del = stdalgo::defaultdeleter<T> >
+class SimpleExtItem : public UnserializableSimpleExtItem<T, Del>
+{
+	const Ext::Serialize<T> serializer;
+
+ public:
+	SimpleExtItem(const std::string& Key, ExtensionItem::ExtensibleType exttype, Module* parent)
+		: UnserializableSimpleExtItem<T, Del>(Key, exttype, parent)
+	{
+	}
+
+	std::string serialize(SerializeFormat format, const Extensible* container, void* item) const CXX11_OVERRIDE
+	{
+		if (!item || format == FORMAT_NETWORK)
+			return "";
+
+		return serializer.serializeStr(format, *static_cast<T*>(item), container, this);
+	}
+
+	void unserialize(SerializeFormat format, Extensible* container, const std::string& value) CXX11_OVERRIDE
+	{
+		if (format == FORMAT_NETWORK)
+			return;
+
+		T* t = serializer.unserialize(format, value, container, this);
+		if (t)
+			this->set(container, t);
+	}
+};
+
 class CoreExport LocalStringExt : public SimpleExtItem<std::string>
 {
  public:
 	LocalStringExt(const std::string& key, ExtensibleType exttype, Module* owner);
 	virtual ~LocalStringExt();
-	std::string serialize(SerializeFormat format, const Extensible* container, void* item) const CXX11_OVERRIDE;
-	void unserialize(SerializeFormat format, Extensible* container, const std::string& value) CXX11_OVERRIDE;
 };
 
 class CoreExport LocalIntExt : public LocalExtItem

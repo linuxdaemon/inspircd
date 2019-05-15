@@ -27,16 +27,12 @@
 #include "modules/ctctags.h"
 #include "modules/exemption.h"
 
-/** Holds flood settings and state for mode +f
- */
-class floodsettings
+struct floodsettings
 {
- public:
 	bool ban;
 	unsigned int secs;
 	unsigned int lines;
 	time_t reset;
-	insp::flat_map<User*, unsigned int> counters;
 
 	floodsettings(bool a, unsigned int b, unsigned int c)
 		: ban(a)
@@ -46,15 +42,55 @@ class floodsettings
 		reset = ServerInstance->Time() + secs;
 	}
 
+	floodsettings(const floodsettings& other)
+		: ban(other.ban)
+		, secs(other.secs)
+		, lines(other.lines)
+		, reset(other.reset)
+	{
+	}
+};
+
+
+namespace Ext
+{
+	template<>
+	struct Serialize<floodsettings>
+		: SerializePrimitive<floodsettings>
+	{
+	};
+}
+
+
+/** Holds flood settings and state for mode +f
+ */
+class flooddata
+{
+ public:
+	typedef insp::flat_map<User*, unsigned int> counter_map;
+	floodsettings settings;
+	counter_map counters;
+
+	flooddata(bool a, unsigned int b, unsigned int c)
+		: settings(a, b, c)
+	{
+	}
+
+	flooddata(const floodsettings& Settings, const counter_map& Counters)
+		: settings(Settings)
+		, counters(Counters)
+	{
+	}
+
 	bool addmessage(User* who)
 	{
-		if (ServerInstance->Time() > reset)
+		if (ServerInstance->Time() > settings.reset)
 		{
 			counters.clear();
-			reset = ServerInstance->Time() + secs;
+			settings.reset = ServerInstance->Time() + settings.secs;
 		}
 
-		return (++counters[who] >= this->lines);
+		return (++counters[who] >= this->settings.lines);
 	}
 
 	void clear(User* who)
@@ -63,13 +99,45 @@ class floodsettings
 	}
 };
 
+namespace Ext
+{
+	template<>
+	struct Serialize<flooddata>
+		: SerializeBase<flooddata>
+	{
+		typedef std::pair<floodsettings, flooddata::counter_map> DataPair;
+		const Serialize<DataPair> ser;
+
+		void serialize(SerializeFormat format, const value_type& value, const Extensible* container, const ExtensionItem* extItem, std::ostream& os) const CXX11_OVERRIDE
+		{
+			return ser.serialize(format, DataPair(value.settings, value.counters), container, extItem, os);
+		}
+
+		value_type* unserialize(SerializeFormat format, const std::string& value, const Extensible* container, const ExtensionItem* extItem) const CXX11_OVERRIDE
+		{
+			DataPair* pair = ser.unserialize(format, value, container, extItem);
+
+			if (!pair)
+				return NULL;
+
+			value_type* vt = new value_type(pair->first, pair->second);
+
+			delete pair;
+
+			return vt;
+		}
+	};
+}
+
+
 /** Handles channel mode +f
  */
-class MsgFlood : public ParamMode<MsgFlood, SimpleExtItem<floodsettings> >
+class MsgFlood
+	: public ParamMode<MsgFlood, SimpleExtItem<flooddata> >
 {
  public:
 	MsgFlood(Module* Creator)
-		: ParamMode<MsgFlood, SimpleExtItem<floodsettings> >(Creator, "flood", 'f')
+		: ParamMode<MsgFlood, SimpleExtItem<flooddata> >(Creator, "flood", 'f')
 	{
 	}
 
@@ -93,16 +161,16 @@ class MsgFlood : public ParamMode<MsgFlood, SimpleExtItem<floodsettings> >
 			return MODEACTION_DENY;
 		}
 
-		ext.set(channel, new floodsettings(ban, nsecs, nlines));
+		ext.set(channel, new flooddata(ban, nsecs, nlines));
 		return MODEACTION_ALLOW;
 	}
 
-	void SerializeParam(Channel* chan, const floodsettings* fs, std::string& out)
+	void SerializeParam(Channel* chan, const flooddata* fs, std::string& out)
 	{
-		if (fs->ban)
+		if (fs->settings.ban)
 			out.push_back('*');
-		out.append(ConvToStr(fs->lines)).push_back(':');
-		out.append(ConvToStr(fs->secs));
+		out.append(ConvToStr(fs->settings.lines)).push_back(':');
+		out.append(ConvToStr(fs->settings.secs));
 	}
 };
 
@@ -135,22 +203,22 @@ private:
 		if (res == MOD_RES_ALLOW)
 			return MOD_RES_PASSTHRU;
 
-		floodsettings *f = mf.ext.get(dest);
+		flooddata* f = mf.ext.get(dest);
 		if (f)
 		{
 			if (f->addmessage(user))
 			{
 				/* Youre outttta here! */
 				f->clear(user);
-				if (f->ban)
+				if (f->settings.ban)
 				{
 					Modes::ChangeList changelist;
 					changelist.push_add(ServerInstance->Modes->FindMode('b', MODETYPE_CHANNEL), "*!*@" + user->GetDisplayedHost());
 					ServerInstance->Modes->Process(ServerInstance->FakeClient, dest, NULL, changelist);
 				}
 
-				const std::string kickMessage = "Channel flood triggered (trigger is " + ConvToStr(f->lines) +
-					" lines in " + ConvToStr(f->secs) + " secs)";
+				const std::string kickMessage = "Channel flood triggered (trigger is " + ConvToStr(f->settings.lines) +
+					" lines in " + ConvToStr(f->settings.secs) + " secs)";
 
 				dest->KickUser(ServerInstance->FakeClient, user, kickMessage);
 
