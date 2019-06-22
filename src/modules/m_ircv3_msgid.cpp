@@ -58,13 +58,6 @@ class MsgIdTag : public ClientProtocol::MessageTagProvider
 	{
 	}
 
-	void OnPopulateTags(ClientProtocol::Message& msg) CXX11_OVERRIDE
-	{
-		const ClientProtocol::TagMap& tags = msg.GetTags();
-		if (tags.find("msgid") == tags.end())
-			msg.AddTag("msgid", this, generator.GetNext());
-	}
-
 	ModResult OnProcessTag(User* user, const std::string& tagname, std::string& tagvalue) CXX11_OVERRIDE
 	{
 		if (!irc::equals(tagname, "msgid"))
@@ -87,7 +80,7 @@ class ModuleMsgId
  private:
 	MsgIdTag tag;
 
-	ModResult CopyMessageId(const ClientProtocol::TagMap& tags_in, ClientProtocol::TagMap& tags_out)
+	ModResult CopyMessageId(User* user, const ClientProtocol::TagMap& tags_in, ClientProtocol::TagMap& tags_out)
 	{
 		ClientProtocol::TagMap::const_iterator iter = tags_in.find("msgid");
 		if (iter != tags_in.end())
@@ -95,7 +88,12 @@ class ModuleMsgId
 			// If the remote server has sent a message identifier we should use that as
 			// identifiers need to be the same on all sides of the network.
 			tags_out.insert(*iter);
+			return MOD_RES_PASSTHRU;
 		}
+		if (!user || IS_LOCAL(user))
+			// Only add the msgid to local messages
+			tags_out.insert(std::make_pair("msgid", ClientProtocol::MessageTagData(&tag, tag.generator.GetNext())));
+
 		return MOD_RES_PASSTHRU;
 	}
 
@@ -108,12 +106,12 @@ class ModuleMsgId
 
 	ModResult OnUserPreMessage(User* user, const MessageTarget& target, MessageDetails& details) CXX11_OVERRIDE
 	{
-		return CopyMessageId(details.tags_in, details.tags_out);
+		return CopyMessageId(user, details.tags_in, details.tags_out);
 	}
 
 	ModResult OnUserPreTagMessage(User* user, const MessageTarget& target, CTCTags::TagMessageDetails& details) CXX11_OVERRIDE
 	{
-		return CopyMessageId(details.tags_in, details.tags_out);
+		return CopyMessageId(user, details.tags_in, details.tags_out);
 	}
 
 	Version GetVersion() CXX11_OVERRIDE
